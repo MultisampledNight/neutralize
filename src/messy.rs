@@ -1,6 +1,7 @@
 use {
-    super::{Map, Metadata, SlotName, Value},
+    super::{collect_or_errors, Color, Map, Metadata, SlotName, Value},
     serde::Deserialize,
+    thiserror::Error,
 };
 
 #[derive(Clone, Debug, Deserialize)]
@@ -14,6 +15,46 @@ pub struct MessyScheme {
     pub palette: Map<String, String>,
 }
 
+#[derive(Debug, Error)]
+#[error(
+    "key '{key}' had an empty value, which can neither link to another slot nor specify a color"
+)]
+pub struct EmptyValueError {
+    pub key: String,
+}
+
+impl TryFrom<MessyScheme> for LinkedScheme {
+    type Error = Vec<EmptyValueError>;
+
+    fn try_from(source: MessyScheme) -> Result<Self, Vec<EmptyValueError>> {
+        Ok(Self {
+            meta: Metadata {
+                name: source.name,
+                author: source.author,
+                description: source.description,
+            },
+            slots: collect_or_errors(
+                source
+                    .variables
+                    .into_iter()
+                    .chain(source.r#override.into_iter())
+                    .chain(source.palette.into_iter())
+                    .map(|(key, value)| {
+                        Ok((
+                            SlotName(key.clone()),
+                            match value.chars().next() {
+                                None => return Err(EmptyValueError { key }),
+                                Some('#') => Value::Contains(Color(value)),
+                                _ => Value::LinkedTo(SlotName(value)),
+                            },
+                        ))
+                    }),
+            )?,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct LinkedScheme {
     pub meta: Metadata,
 
