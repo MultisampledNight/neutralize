@@ -1,15 +1,17 @@
 use {
-    super::{Color, LinkedScheme, Map, Metadata, SlotName, Value},
+    super::{Color, LinkedScheme, Map, Metadata, Set, SlotName, Value},
     serde::Serialize,
     thiserror::Error,
 };
 
-#[derive(Debug, Error)]
+#[derive(Clone, Debug, Error)]
 pub enum ResolveError {
     #[error("Noticed a neverending loop of slot links, involved are {involved:?}")]
     InfiniteLoop { involved: Vec<SlotName> },
-    #[error("{from:?} link to '{to}', which doesn't exist")]
+    #[error("{from:?} links to '{to}', which doesn't exist")]
     LinkToNonexistent { from: Vec<SlotName>, to: SlotName },
+    #[error("Impossible to resolve '{subject}', which links to itself")]
+    LinkToItself { subject: SlotName },
 }
 
 #[derive(Default)]
@@ -18,6 +20,8 @@ struct State {
     resolved: Map<SlotName, Color>,
     /// left slots which are depended on, right slots which depend on the left
     pending: Map<SlotName, Vec<SlotName>>,
+    /// any loops/other errors which were detected while processing
+    errors: Vec<ResolveError>,
 }
 
 impl State {
@@ -27,23 +31,38 @@ impl State {
             Ok(self.resolved)
         } else {
             // ok, then let's analyze what happened
-            Err(self
-                .pending
+            // they've been detected as loops already and might issue false positives else
+            let names_to_ignore: Set<_> = self
+                .errors
+                .clone()
                 .into_iter()
-                .map(|(target, dependents)| {
-                    if dependents.contains(&target) {
-                        // a => [a, b] if a: b and b: a = infinite loop
-                        ResolveError::InfiniteLoop {
-                            involved: dependents,
-                        }
-                    } else {
-                        // c => d if d is not defined = link to nonexistent
-                        ResolveError::LinkToNonexistent {
-                            from: dependents,
-                            to: target,
-                        }
+                .flat_map(|err| match err {
+                    ResolveError::InfiniteLoop { involved } => involved,
+                    _ => {
+                        unreachable!(
+                            "no other error than InfiniteLoop could have been emitted in before"
+                        )
                     }
                 })
+                .collect();
+
+            Err(self
+                .errors
+                .into_iter()
+                .chain(self.pending.into_iter().filter_map(|(target, dependents)| {
+                    (!names_to_ignore.contains(&target)).then(|| {
+                        // [0] is safe here, there's literally no case where an empty set depends
+                        // on something
+                        if dependents[0] == target {
+                            ResolveError::LinkToItself { subject: target }
+                        } else {
+                            ResolveError::LinkToNonexistent {
+                                from: dependents,
+                                to: target,
+                            }
+                        }
+                    })
+                }))
                 .collect())
         }
     }
@@ -80,12 +99,14 @@ impl TryFrom<LinkedScheme> for ResolvedScheme {
                             if let Some(color) = state.resolved.get(&target) {
                                 insert_this_and_dependents(this_name, color.clone(), &mut state);
                             } else {
-                                println!("{} => {} ({:?})", &this_name, &target, &state.pending);
-                                detect_loop(&this_name, &target, &state).unwrap();
-                                let mut pending_names =
-                                    state.pending.remove(&this_name).unwrap_or_else(Vec::new);
-                                pending_names.push(this_name);
-                                state.pending.insert(target, pending_names);
+                                if let Err(involved) = detect_loop(&this_name, &target, &state) {
+                                    state.errors.push(ResolveError::InfiniteLoop { involved });
+                                } else {
+                                    let mut pending_names =
+                                        state.pending.remove(&this_name).unwrap_or_else(Vec::new);
+                                    pending_names.push(this_name);
+                                    state.pending.insert(target, pending_names);
+                                }
                             }
                         }
                         Value::Contains(color) => {

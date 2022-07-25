@@ -4,7 +4,12 @@ mod resolve;
 pub use messy::{LinkedScheme, MessyScheme};
 pub use resolve::ResolvedScheme;
 
-use {indexmap::IndexMap, itertools::Itertools, serde::Serialize, std::fmt};
+use {
+    indexmap::IndexMap,
+    itertools::Itertools,
+    serde::Serialize,
+    std::{collections::HashSet, fmt},
+};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Metadata {
@@ -14,6 +19,7 @@ pub struct Metadata {
 }
 
 pub type Map<T, U> = IndexMap<T, U>;
+pub type Set<T> = HashSet<T>;
 
 // TODO: probably want to change this to something more specific
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
