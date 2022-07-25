@@ -9,5 +9,6 @@ fn main() {
             .unwrap();
     let scheme: LinkedScheme = scheme.try_into().unwrap();
     let scheme: ResolvedScheme = scheme.try_into().unwrap();
-    dbg!(scheme);
+    let scheme = serde_yaml::to_string(&scheme).unwrap();
+    println!("{}", scheme);
 }

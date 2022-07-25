@@ -155,7 +155,6 @@ fn detect_loop(start: &SlotName, target: &SlotName, state: &State) -> Result<(),
             .cloned()
             .unwrap_or_else(Vec::new)
         {
-            dbg!(&target, &path_depth, &name);
             if target == name {
                 // that's a loop
                 path_depth.push(name);
