@@ -16,9 +16,7 @@ pub struct MessyScheme {
 }
 
 #[derive(Debug, Error)]
-#[error(
-    "Key '{key}' had an empty value, which can neither link to another slot nor specify a color"
-)]
+#[error("Key {key} had an empty value, which can neither link to another slot nor specify a color")]
 pub struct EmptyValueError {
     pub key: String,
 }

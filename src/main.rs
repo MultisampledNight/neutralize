@@ -1,14 +1,24 @@
-use {
-    neutralize::{LinkedScheme, MessyScheme, ResolvedScheme},
-    std::{env, fs},
-};
+use std::{env, fs, process::ExitCode};
 
-fn main() {
-    let scheme: MessyScheme =
-        serde_yaml::from_str(&fs::read_to_string(env::args().skip(1).next().unwrap()).unwrap())
-            .unwrap();
-    let scheme: LinkedScheme = scheme.try_into().unwrap();
-    let scheme: ResolvedScheme = scheme.try_into().unwrap();
-    let scheme = serde_yaml::to_string(&scheme).unwrap();
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let file_contents = fs::read_to_string(
+        env::args()
+            .skip(1)
+            .next()
+            .ok_or("This program takes one YAML base17 file as its first argument")?,
+    )?;
+    let scheme = neutralize::resolve_yaml(file_contents)?;
     println!("{}", scheme);
+
+    Ok(())
+}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("Error: {}", err);
+            ExitCode::FAILURE
+        }
+    }
 }

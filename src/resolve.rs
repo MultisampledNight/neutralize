@@ -1,16 +1,19 @@
 use {
-    super::{Color, LinkedScheme, Map, Metadata, Set, SlotName, Value},
+    super::{Color, LinkedScheme, Map, Metadata, MultipleSlotNames, Set, SlotName, Value},
     serde::Serialize,
     thiserror::Error,
 };
 
 #[derive(Clone, Debug, Error)]
-pub enum ResolveError {
-    #[error("Noticed a neverending loop of slot links, involved are {involved:?}")]
-    InfiniteLoop { involved: Vec<SlotName> },
-    #[error("{from:?} links to '{to}', which doesn't exist")]
-    LinkToNonexistent { from: Vec<SlotName>, to: SlotName },
-    #[error("Impossible to resolve '{subject}', which links to itself")]
+pub enum Error {
+    #[error("Noticed a neverending loop of slot links, involved are {involved}")]
+    InfiniteLoop { involved: MultipleSlotNames },
+    #[error("{from} link to {to}, which doesn't exist")]
+    LinkToNonexistent {
+        from: MultipleSlotNames,
+        to: SlotName,
+    },
+    #[error("Impossible to resolve {subject}, which links to itself")]
     LinkToItself { subject: SlotName },
 }
 
@@ -21,12 +24,12 @@ struct State {
     /// left slots which are depended on, right slots which depend on the left
     pending: Map<SlotName, Vec<SlotName>>,
     /// any loops/other errors which were detected while processing
-    errors: Vec<ResolveError>,
+    errors: Vec<Error>,
 }
 
 impl State {
     /// Returns all resolved values, erroring if there's anything pending.
-    fn resolved_or_errors(self) -> Result<Map<SlotName, Color>, Vec<ResolveError>> {
+    fn resolved_or_errors(self) -> Result<Map<SlotName, Color>, Vec<Error>> {
         if self.pending.is_empty() {
             Ok(self.resolved)
         } else {
@@ -37,7 +40,7 @@ impl State {
                 .clone()
                 .into_iter()
                 .flat_map(|err| match err {
-                    ResolveError::InfiniteLoop { involved } => involved,
+                    Error::InfiniteLoop { involved } => involved.0,
                     _ => {
                         unreachable!(
                             "no other error than InfiniteLoop could have been emitted in before"
@@ -54,10 +57,10 @@ impl State {
                         // [0] is safe here, there's literally no case where an empty set depends
                         // on something
                         if dependents[0] == target {
-                            ResolveError::LinkToItself { subject: target }
+                            Error::LinkToItself { subject: target }
                         } else {
-                            ResolveError::LinkToNonexistent {
-                                from: dependents,
+                            Error::LinkToNonexistent {
+                                from: dependents.into(),
                                 to: target,
                             }
                         }
@@ -69,8 +72,8 @@ impl State {
 }
 
 impl TryFrom<LinkedScheme> for ResolvedScheme {
-    type Error = Vec<ResolveError>;
-    fn try_from(source: LinkedScheme) -> Result<Self, Vec<ResolveError>> {
+    type Error = Vec<Error>;
+    fn try_from(source: LinkedScheme) -> Result<Self, Vec<Error>> {
         // this could be a fun benchmark, would it be better here to use a stack-based solution?
         // let resolved = Map::new();
         //
@@ -100,7 +103,9 @@ impl TryFrom<LinkedScheme> for ResolvedScheme {
                                 insert_this_and_dependents(this_name, color.clone(), &mut state);
                             } else {
                                 if let Err(involved) = detect_loop(&this_name, &target, &state) {
-                                    state.errors.push(ResolveError::InfiniteLoop { involved });
+                                    state.errors.push(Error::InfiniteLoop {
+                                        involved: involved.into(),
+                                    });
                                 } else {
                                     let mut pending_names =
                                         state.pending.remove(&this_name).unwrap_or_else(Vec::new);
