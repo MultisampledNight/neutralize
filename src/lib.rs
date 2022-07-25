@@ -4,7 +4,7 @@ mod resolve;
 pub use messy::{LinkedScheme, MessyScheme};
 pub use resolve::ResolvedScheme;
 
-use {itertools::Itertools, serde::Serialize, std::collections::BTreeMap};
+use {indexmap::IndexMap, itertools::Itertools, serde::Serialize, std::fmt};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Metadata {
@@ -13,7 +13,7 @@ pub struct Metadata {
     pub description: Option<String>,
 }
 
-pub type Map<T, U> = BTreeMap<T, U>;
+pub type Map<T, U> = IndexMap<T, U>;
 
 // TODO: probably want to change this to something more specific
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -21,6 +21,12 @@ pub struct Color(pub String);
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct SlotName(pub String);
+
+impl fmt::Display for SlotName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum Value {
