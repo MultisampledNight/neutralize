@@ -1,6 +1,8 @@
 use {
     super::{Color, LinkedScheme, Map, Metadata, MultipleSlotNames, Set, SlotName, Value},
+    indexmap::map::Entry,
     serde::Serialize,
+    std::iter,
     thiserror::Error,
 };
 
@@ -17,10 +19,15 @@ pub enum Error {
     LinkToItself { subject: SlotName },
 }
 
+enum PossiblyResolvedColor {
+    BlockedOn(SlotName),
+    Ready(Color),
+}
+
 #[derive(Default)]
 struct State {
     /// slots which are already done
-    resolved: Map<SlotName, Color>,
+    resolved: Map<SlotName, PossiblyResolvedColor>,
     /// left slots which are depended on, right slots which depend on the left
     pending: Map<SlotName, Vec<SlotName>>,
     /// any loops/other errors which were detected while processing
@@ -31,7 +38,16 @@ impl State {
     /// Returns all resolved values, erroring if there's anything pending.
     fn resolved_or_errors(self) -> Result<Map<SlotName, Color>, Vec<Error>> {
         if self.pending.is_empty() {
-            Ok(self.resolved)
+            Ok(self
+                .resolved
+                .into_iter()
+                .map(|(name, value)| match value {
+                    PossiblyResolvedColor::Ready(color) => (name, color),
+                    _ => unreachable!(
+                        "there can be no value blocked on another if there's nothing pending"
+                    ),
+                })
+                .collect())
         } else {
             // ok, then let's analyze what happened
             // they've been detected as loops already and might issue false positives else
@@ -74,17 +90,6 @@ impl State {
 impl TryFrom<LinkedScheme> for ResolvedScheme {
     type Error = Vec<Error>;
     fn try_from(source: LinkedScheme) -> Result<Self, Vec<Error>> {
-        // this could be a fun benchmark, would it be better here to use a stack-based solution?
-        // let resolved = Map::new();
-        //
-        // let resolve_stack = Vec::new();
-        // while let Some((name, value)) = resolve_stack.pop().unwrap_or_else(|| source.slots.pop()) {
-        //     match value {
-        //         Value::Contains(color) => resolved.insert(key, ResolvingValue::Finished(color)),
-        //         Value::LinkedTo(target) => if let Some(already_resolved) = resolved
-        //     }
-        // }
-
         Ok(Self {
             meta: source.meta,
             // idea is to run through all values once, and at each
@@ -98,24 +103,40 @@ impl TryFrom<LinkedScheme> for ResolvedScheme {
                 .into_iter()
                 .fold(State::default(), |mut state, (this_name, value)| {
                     match value {
+                        Value::Contains(color) => {
+                            // noice, just resolved
+                            insert_this_and_dependents(this_name, color, &mut state);
+                        }
                         Value::LinkedTo(target) => {
-                            if let Some(color) = state.resolved.get(&target) {
-                                insert_this_and_dependents(this_name, color.clone(), &mut state);
-                            } else {
-                                if let Err(involved) = detect_loop(&this_name, &target, &state) {
-                                    state.errors.push(Error::InfiniteLoop {
-                                        involved: involved.into(),
-                                    });
-                                } else {
-                                    let mut pending_names =
-                                        state.pending.remove(&this_name).unwrap_or_else(Vec::new);
-                                    pending_names.push(this_name);
-                                    state.pending.insert(target, pending_names);
+                            // so this links to some other name...
+                            match state.resolved.get(&target) {
+                                Some(PossiblyResolvedColor::Ready(color)) => {
+                                    // ...but that name has been resolved already
+                                    insert_this_and_dependents(this_name, color.clone(), &mut state)
+                                }
+                                Some(PossiblyResolvedColor::BlockedOn(block_name)) => {
+                                    // ...but that name is also just blocked, let's block on the
+                                    // actual one and "migrate" all existing values (after checking
+                                    // for loops)
+                                    migrate_this_to_blocker(
+                                        this_name.clone(),
+                                        block_name.clone(),
+                                        &mut state,
+                                    );
+
+                                    if let Err(involved) = detect_loop(&this_name, &target, &state)
+                                    {
+                                        state.errors.push(Error::InfiniteLoop {
+                                            involved: involved.into(),
+                                        })
+                                    }
+                                }
+                                None => {
+                                    // ...but that target name isn't even processed yet, in that
+                                    // case the target name is the blocker
+                                    migrate_this_to_blocker(this_name, target.clone(), &mut state);
                                 }
                             }
-                        }
-                        Value::Contains(color) => {
-                            insert_this_and_dependents(this_name, color, &mut state);
                         }
                     };
 
@@ -138,10 +159,41 @@ fn insert_this_and_dependents(this_name: SlotName, color: Color, state: &mut Sta
         .remove(&this_name)
         .unwrap_or_else(Vec::new)
         .into_iter()
+        .chain(iter::once(this_name))
     {
-        state.resolved.insert(name, color.clone());
+        state
+            .resolved
+            .insert(name, PossiblyResolvedColor::Ready(color.clone()));
     }
-    state.resolved.insert(this_name, color);
+}
+
+fn migrate_this_to_blocker(this_name: SlotName, block_name: SlotName, state: &mut State) {
+    let mut pending_on_this = state
+        .pending
+        .remove(&this_name)
+        .unwrap_or_else(|| Vec::with_capacity(1));
+
+    // make sure that this slot will also depend on the new blocker
+    pending_on_this.push(this_name);
+
+    for pending_name in pending_on_this.clone() {
+        // fortunately pending things _cannot_ be "suddently" resolved for other reasons
+        // that makes it impossible to change from resolved => blocked on, so it's fine to just
+        // overwrite I guess
+        state.resolved.insert(
+            pending_name,
+            PossiblyResolvedColor::BlockedOn(block_name.clone()),
+        );
+    }
+
+    match state.pending.entry(block_name.clone()) {
+        Entry::Occupied(mut entry) => {
+            entry.get_mut().extend(pending_on_this);
+        }
+        Entry::Vacant(entry) => {
+            entry.insert(pending_on_this);
+        }
+    }
 }
 
 /// Checks whether `start` is in a loop in `state`, errors with involved if that's the case.
