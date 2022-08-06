@@ -56,8 +56,8 @@ impl TryFrom<MessyScheme> for LinkedScheme {
 pub struct LinkedScheme {
     pub meta: Metadata,
 
-    /// base17 doesn't describe this super-well, but basically all those sections boil down to
+    /// basenext doesn't describe this super-well, but basically all those sections boil down to
     /// one big hashmap, where every key is called a "slot". Then, once in that pool, we can
-    /// resolve as we want. Note that base17 is still under heavy thoughtwork though.
+    /// resolve as we want. Note that basenext is still under heavy thoughtwork though.
     pub slots: Map<SlotName, Value>,
 }

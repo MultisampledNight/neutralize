@@ -132,7 +132,7 @@ impl fmt::Display for Error {
     }
 }
 
-/// Expects a scheme adhering to the [base17](https://github.com/base16-project/base17) spec,
+/// Expects a scheme adhering to the [basenext](https://github.com/base16-project/basenext) spec,
 /// outputs a YAML file with two sections: `meta` with some general information about the scheme,
 /// and `slots` with all slots the scheme contained.
 pub fn resolve_yaml(source: String) -> Result<String, Error> {

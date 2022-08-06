@@ -5,7 +5,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         env::args()
             .skip(1)
             .next()
-            .ok_or("This program takes one YAML base17 file as its first argument")?,
+            .ok_or("This program takes one YAML basenext file as its first argument")?,
     )?;
     let scheme = neutralize::resolve_yaml(file_contents)?;
     println!("{}", scheme);
