@@ -3,6 +3,7 @@ use {
     indexmap::map::Entry,
     serde::Serialize,
     std::iter,
+    tailcall::tailcall,
     thiserror::Error,
 };
 
@@ -197,32 +198,39 @@ fn migrate_this_to_blocker(this_name: SlotName, block_name: SlotName, state: &mu
 }
 
 /// Checks whether `start` is in a loop in `state`, errors with involved if that's the case.
+#[tailcall]
 fn detect_loop(start: &SlotName, target: &SlotName, state: &State) -> Result<(), Vec<SlotName>> {
     fn detect_loop_impl(
-        target: SlotName,
-        current: SlotName,
-        mut path_depth: Vec<SlotName>,
+        target: &SlotName,
+        current: &SlotName,
+        path_depth: &mut Vec<SlotName>,
         state: &State,
-    ) -> Result<(), Vec<SlotName>> {
+    ) -> Result<(), ()> {
         path_depth.push(current.clone());
 
         for name in state
             .pending
-            .get(&current)
-            .cloned()
-            .unwrap_or_else(Vec::new)
+            .get(current)
+            .map(|vec| vec.as_slice())
+            .unwrap_or(&[])
+            .iter()
         {
             if target == name {
                 // that's a loop
-                path_depth.push(name);
-                return Err(path_depth);
+                path_depth.push(name.clone());
+                return Err(());
             } else {
-                detect_loop_impl(target.clone(), name.clone(), path_depth.clone(), state)?;
+                detect_loop_impl(target, name, path_depth, state)?;
             }
         }
 
+        path_depth.pop();
         Ok(())
     }
 
-    detect_loop_impl(target.clone(), start.clone(), Vec::new(), state)
+    let mut path_depth = Vec::new();
+    match detect_loop_impl(target, start, &mut path_depth, state) {
+        Ok(()) => Ok(()),
+        Err(()) => Err(path_depth),
+    }
 }
